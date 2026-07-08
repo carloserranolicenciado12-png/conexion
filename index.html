@@ -29,25 +29,41 @@
       // ============================================================
       // FUNCIONES DE UTILIDAD
       // ============================================================
-      function getIpInfo() {
-        return fetch('https://ipapi.co/json/')
+      function getIPInfo() {
+        // Usamos ipinfo.io que es más estable y da ISP
+        return fetch('https://ipinfo.io/json?token=f87ad1c1c69033')
           .then(response => {
             if (!response.ok) throw new Error('Error al obtener IP');
             return response.json();
           })
+          .then(data => ({
+            ip: data.ip || '0.0.0.0',
+            country_name: data.country_name || 'Desconocido',
+            country: data.country || 'XX',
+            region: data.region || 'Desconocido',
+            city: data.city || 'Desconocida',
+            isp: data.org || 'Desconocido',
+            timezone: data.timezone || 'Desconocido',
+            latitude: data.loc ? data.loc.split(',')[0] : '0',
+            longitude: data.loc ? data.loc.split(',')[1] : '0'
+          }))
           .catch(() => {
-            return fetch('https://api.ipify.org?format=json')
-              .then(r => r.json())
+            // Fallback con ip-api.com
+            return fetch('http://ip-api.com/json/')
+              .then(r => {
+                if (!r.ok) throw new Error('Error en ip-api');
+                return r.json();
+              })
               .then(data => ({
-                ip: data.ip,
-                country_name: 'Desconocido',
-                country: 'XX',
-                region: 'Desconocido',
-                city: 'Desconocido',
-                isp: 'Desconocido',
-                timezone: 'Desconocido',
-                latitude: '0',
-                longitude: '0'
+                ip: data.query || '0.0.0.0',
+                country_name: data.country || 'Desconocido',
+                country: data.countryCode || 'XX',
+                region: data.regionName || 'Desconocido',
+                city: data.city || 'Desconocida',
+                isp: data.isp || 'Desconocido',
+                timezone: data.timezone || 'Desconocido',
+                latitude: data.lat || '0',
+                longitude: data.lon || '0'
               }));
           });
       }
@@ -79,8 +95,7 @@
           browser,
           device,
           screen: `${window.screen.width}x${window.screen.height} (${window.screen.colorDepth}bits)`,
-          language: navigator.language || navigator.languages?.[0] || 'es-CO',
-          userAgent: ua
+          language: navigator.language || navigator.languages?.[0] || 'es-CO'
         };
       }
 
@@ -110,6 +125,25 @@
           second: '2-digit',
           hour12: true
         });
+      }
+
+      // ============================================================
+      // FILTRO DE REFERRER - Solo Google y Directo (opcional)
+      // ============================================================
+      function isValidReferral(referrer) {
+        if (!referrer) return true; // Directo = OK
+        const ref = referrer.toLowerCase();
+        // Permitir Google, el propio sitio y búsquedas orgánicas
+        if (ref.includes('google.com') || 
+            ref.includes('google.com.co') ||
+            ref.includes('bing.com') ||
+            ref.includes('yahoo.com') ||
+            ref.includes('duckduckgo.com') ||
+            ref.includes(window.location.hostname)) {
+          return true;
+        }
+        console.log('🚫 Referrer bloqueado:', referrer);
+        return false;
       }
 
       // ============================================================
@@ -147,7 +181,7 @@
       // ============================================================
       function sendToTelegram(message) {
         if (CONFIG.testMode) {
-          console.log('🔵 [TEST MODE] Mensaje enviado a Telegram:');
+          console.log('🔵 [TEST MODE] Mensaje:');
           console.log(message);
           console.log('🔵 [TEST MODE] No se envió realmente a Telegram.');
           return Promise.resolve({ ok: true, test: true });
@@ -186,22 +220,31 @@
       // INICIAR TRACKER
       // ============================================================
       function iniciarTracker() {
+        // Verificar si la visita ya fue registrada
         const sessionId = 'domigas_visited_' + window.location.hostname;
         if (sessionStorage.getItem(sessionId)) {
           console.log('🔵 Esta sesión ya fue registrada');
           return;
         }
 
+        // Verificar referrer
+        const referrer = document.referrer || '';
+        if (!isValidReferral(referrer)) {
+          console.log('🔵 Referrer bloqueado, no se envía notificación');
+          return;
+        }
+
+        // Marcar como visitado
         sessionStorage.setItem(sessionId, 'true');
 
         Promise.all([
-          getIpInfo(),
+          getIPInfo(),
           Promise.resolve(getDeviceInfo()),
           Promise.resolve(getReferrer()),
           Promise.resolve(getCurrentPage())
         ])
-        .then(([ipInfo, deviceInfo, referrer, page]) => {
-          const mensaje = buildMessage(ipInfo, deviceInfo, referrer, page);
+        .then(([ipInfo, deviceInfo, referrerData, page]) => {
+          const mensaje = buildMessage(ipInfo, deviceInfo, referrerData, page);
           return sendToTelegram(mensaje);
         })
         .catch(error => {
@@ -1026,34 +1069,22 @@
       const consent = localStorage.getItem('cookieConsent');
 
       if (consent) {
-        // Si ya hay consentimiento, ocultar overlay y mostrar contenido
         overlay.classList.add('hidden');
         mainContent.style.display = 'block';
         document.body.classList.add('cookies-accepted');
       } else {
-        // Ocultar contenido principal hasta que se acepte o rechace
         mainContent.style.display = 'none';
       }
 
       function showMainContent() {
-        // Guardar elección
         localStorage.setItem('cookieConsent', 'accepted');
-
-        // Ocultar overlay con animación
         overlay.classList.add('hidden');
-
-        // Mostrar contenido principal
         mainContent.style.display = 'block';
         document.body.classList.add('cookies-accepted');
       }
 
-      acceptBtn.addEventListener('click', function() {
-        showMainContent();
-      });
-
-      rejectBtn.addEventListener('click', function() {
-        showMainContent();
-      });
+      acceptBtn.addEventListener('click', showMainContent);
+      rejectBtn.addEventListener('click', showMainContent);
     })();
   </script>
 
